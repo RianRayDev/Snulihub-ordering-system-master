@@ -6,7 +6,8 @@ import {
   doc, 
   deleteDoc, 
   updateDoc, 
-  serverTimestamp
+  serverTimestamp,
+  setDoc
 } from 'firebase/firestore';
 import app from '../firebaseConfig';
 import { userService } from '../services/userService';
@@ -22,12 +23,112 @@ import {
   ArrowDownCircleIcon,
   PlusIcon,
   MagnifyingGlassIcon,
-  FunnelIcon
+  FunnelIcon,
+  UserCircleIcon
 } from '@heroicons/react/24/outline';
 import CreateUserModal from '../components/CreateUserModal';
 import { useAuth } from '../context/AuthContext';
+import StatusIndicator from '../components/StatusIndicator';
 
 const db = getFirestore(app);
+
+const ProfileIcon = () => (
+  <svg
+    className="h-11 w-11"
+    viewBox="0 0 40 40"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    {/* Outer Circle with Gradient */}
+    <circle 
+      cx="20" 
+      cy="20" 
+      r="20" 
+      className="fill-[url(#gradient-bg)]"
+    />
+    
+    {/* Profile Shape with Soft Shadows */}
+    <g filter="url(#shadow)">
+      <circle 
+        cx="20" 
+        cy="15" 
+        r="6.5" 
+        className="fill-[url(#gradient-profile)]"
+      />
+      <path
+        d="M32 31.5C32 27.4 26.6274 24.5 20 24.5C13.3726 24.5 8 27.4 8 31.5"
+        strokeWidth="3"
+        strokeLinecap="round"
+        className="stroke-[#82a6f4]"
+        style={{ opacity: 0.9 }}
+      />
+    </g>
+
+    {/* Gradient Definitions */}
+    <defs>
+      <linearGradient
+        id="gradient-bg-user"
+        x1="0"
+        y1="0"
+        x2="40"
+        y2="40"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset="0%" stopColor="#82a6f4" stopOpacity="0.08" />
+        <stop offset="100%" stopColor="#82a6f4" stopOpacity="0.12" />
+      </linearGradient>
+      
+      <linearGradient
+        id="gradient-profile-user"
+        x1="15"
+        y1="10"
+        x2="25"
+        y2="22"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset="0%" stopColor="#82a6f4" stopOpacity="0.9" />
+        <stop offset="100%" stopColor="#82a6f4" stopOpacity="0.8" />
+      </linearGradient>
+
+      {/* Soft Shadow Effect */}
+      <filter
+        id="shadow-user"
+        x="-2"
+        y="-2"
+        width="44"
+        height="44"
+        filterUnits="userSpaceOnUse"
+        colorInterpolationFilters="sRGB"
+      >
+        <feFlood floodOpacity="0" result="BackgroundImageFix" />
+        <feColorMatrix
+          in="SourceAlpha"
+          type="matrix"
+          values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
+          result="hardAlpha"
+        />
+        <feOffset dy="1" />
+        <feGaussianBlur stdDeviation="1" />
+        <feComposite in2="hardAlpha" operator="out" />
+        <feColorMatrix
+          type="matrix"
+          values="0 0 0 0 0.509804 0 0 0 0 0.65098 0 0 0 0 0.956863 0 0 0 0.15 0"
+        />
+        <feBlend
+          mode="normal"
+          in2="BackgroundImageFix"
+          result="effect1_dropShadow_0_1"
+        />
+        <feBlend
+          mode="normal"
+          in="SourceGraphic"
+          in2="effect1_dropShadow_0_1"
+          result="shape"
+        />
+      </filter>
+    </defs>
+  </svg>
+);
 
 const UserConsole = () => {
   const [users, setUsers] = useState([]);
@@ -62,6 +163,7 @@ const UserConsole = () => {
   const [userCategory, setUserCategory] = useState('');
   const [isTestAdmin, setIsTestAdmin] = useState(false);
   const { currentUser } = useAuth();
+  const [usersNeedingUpdate, setUsersNeedingUpdate] = useState(new Set());
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -84,6 +186,25 @@ const UserConsole = () => {
 
     checkAuth();
   }, [currentUser, navigate]);
+
+  useEffect(() => {
+    const checkUsersSchema = () => {
+      const needsUpdate = new Set();
+      
+      users.forEach(user => {
+        if (!user.userId || 
+            user.permissions === undefined || 
+            !user.schemaVersion || 
+            user.schemaVersion < 1) {
+          needsUpdate.add(user.id);
+        }
+      });
+
+      setUsersNeedingUpdate(needsUpdate);
+    };
+
+    checkUsersSchema();
+  }, [users]);
 
   const fetchUsers = async () => {
     try {
@@ -126,13 +247,77 @@ const UserConsole = () => {
   const handleCreateUser = async (userData) => {
     setIsCreatingUser(true);
     try {
-      if (userData.username && userData.category !== 'customer') {
-        await userService.validateUsername(userData.username);
+      // Generate proper user ID based on category
+      const userId = generateUserId(userData.category, users);
+      
+      // Prepare base user data
+      const baseUserData = {
+        id: userId,
+        userId: userId,
+        isActive: true,
+        isOnline: false,
+        lastActiveAt: null,
+        lastLoginAt: null,
+        schemaVersion: 1,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      // Category-specific configurations
+      const categoryConfigs = {
+        webmaster: {
+          permissions: true,
+          username: userData.username,
+          requiresUsername: true
+        },
+        franchise: {
+          permissions: false,
+          username: userData.username,
+          requiresUsername: true
+        },
+        customer: {
+          permissions: false,
+          username: null,
+          requiresUsername: false
+        },
+        test: {
+          permissions: false,
+          username: userData.username,
+          requiresUsername: true
+        }
+      };
+
+      const categoryConfig = categoryConfigs[userData.category];
+      
+      // Validate username if required
+      if (categoryConfig.requiresUsername && !userData.username) {
+        throw new Error(`Username is required for ${userData.category} accounts`);
       }
-      await userService.createUser(userData);
-      showNotification('User created successfully!', 'success');
-      setIsAddUserModalOpen(false);
-      fetchUsers();
+
+      if (categoryConfig.requiresUsername && userData.username) {
+        const existingUser = await userService.getUserByUsername(userData.username);
+        if (existingUser) {
+          throw new Error('Username already exists');
+        }
+      }
+
+      // Combine all data
+      const newUserData = {
+        ...baseUserData,
+        ...userData,
+        ...categoryConfig
+      };
+
+      // Create user
+      const success = await userService.createUser(newUserData);
+      
+      if (success) {
+        showNotification(`${userData.category} user created successfully!`, 'success');
+        setIsAddUserModalOpen(false);
+        await fetchUsers();
+      } else {
+        throw new Error('Failed to create user');
+      }
     } catch (err) {
       showNotification(err.message, 'error');
     } finally {
@@ -143,22 +328,73 @@ const UserConsole = () => {
   // Update user
   const handleUpdateUser = async (updates) => {
     try {
-      if (updates.username && editingUser.category !== 'customer') {
-        await userService.validateUsername(updates.username);
+      if (!editingUser) return;
+
+      // Special handling for category changes
+      if (updates.category && updates.category !== editingUser.category) {
+        // Generate new userId based on new category
+        const newUserId = generateUserId(updates.category, users);
+        
+        // Delete old document first
+        const oldUserRef = doc(db, 'users', editingUser.id);
+        await deleteDoc(oldUserRef);
+
+        // Prepare update data based on target category
+        const updateData = {
+          ...editingUser,
+          ...updates,
+          id: newUserId,
+          userId: newUserId,
+          updatedAt: new Date(),
+          schemaVersion: 1
+        };
+
+        // Category-specific adjustments
+        switch(updates.category) {
+          case 'customer':
+            updateData.username = null;
+            updateData.permissions = false;
+            break;
+          case 'franchise':
+            updateData.username = `fr_${editingUser.firstName.toLowerCase()}`;
+            updateData.permissions = false;
+            break;
+          case 'webmaster':
+            updateData.username = `web_${editingUser.firstName.toLowerCase()}`;
+            updateData.permissions = true;
+            break;
+          case 'test':
+            updateData.username = `te_${editingUser.firstName.toLowerCase()}`;
+            updateData.permissions = false;
+            break;
+        }
+
+        // Create new document with new ID
+        const newUserRef = doc(db, 'users', newUserId);
+        await setDoc(newUserRef, updateData);
+
+        showNotification(`User updated to ${updates.category} successfully`, 'success');
+        setIsEditModalOpen(false);
+        setEditingUser(null);
+        fetchUsers();
+        return;
       }
-      
-      const userRef = doc(db, 'users', editingUser.id);
-      await updateDoc(userRef, {
+
+      // Handle other updates
+      const updateData = {
+        ...editingUser,
         ...updates,
-        updatedAt: serverTimestamp()
-      });
-      
-      showNotification('User updated successfully!', 'success');
-      setEditingUser(null);
+        updatedAt: new Date(),
+        schemaVersion: 1
+      };
+
+      await userService.updateUser(editingUser.id, updateData);
+      showNotification('User updated successfully', 'success');
       setIsEditModalOpen(false);
+      setEditingUser(null);
       fetchUsers();
-    } catch (err) {
-      showNotification(err.message, 'error');
+    } catch (error) {
+      showNotification(error.message, 'error');
     }
   };
 
@@ -177,25 +413,69 @@ const UserConsole = () => {
 
   // Upgrade user to franchise
   const handleUpgradeToFranchise = async (userId) => {
-    if (window.confirm('Are you sure you want to upgrade this user to franchise? This will create a new franchise account and transfer all data.')) {
-      try {
-        await userService.upgradeToFranchise(userId);
-        fetchUsers();
-      } catch (err) {
-        setError('Error upgrading user: ' + err.message);
-      }
+    try {
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
+
+      // Generate new franchise ID
+      const newUserId = generateUserId('franchise', users);
+
+      // Delete old document first
+      const oldUserRef = doc(db, 'users', userId);
+      await deleteDoc(oldUserRef);
+
+      // Create new document with franchise data
+      const updateData = {
+        ...user,
+        id: newUserId,
+        userId: newUserId,
+        category: 'franchise',
+        permissions: false,
+        updatedAt: new Date()
+      };
+
+      // Create new document with new ID
+      const newUserRef = doc(db, 'users', newUserId);
+      await setDoc(newUserRef, updateData);
+
+      showNotification('User upgraded to franchise successfully', 'success');
+      fetchUsers();
+    } catch (error) {
+      showNotification(error.message, 'error');
     }
   };
 
   // Revert franchise to customer
   const handleRevertToCustomer = async (userId) => {
-    if (window.confirm('Are you sure you want to revert this franchise back to customer? This will create a new customer account and transfer all data.')) {
-      try {
-        await userService.revertToCustomer(userId);
-        fetchUsers();
-      } catch (err) {
-        setError('Error reverting user: ' + err.message);
-      }
+    try {
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
+
+      // Generate new customer ID
+      const newUserId = generateUserId('customer', users);
+
+      // Delete old document first
+      const oldUserRef = doc(db, 'users', userId);
+      await deleteDoc(oldUserRef);
+
+      // Create new document with customer data
+      const updateData = {
+        ...user,
+        id: newUserId,
+        userId: newUserId,
+        category: 'customer',
+        permissions: false,
+        updatedAt: new Date()
+      };
+
+      // Create new document with new ID
+      const newUserRef = doc(db, 'users', newUserId);
+      await setDoc(newUserRef, updateData);
+
+      showNotification('User reverted to customer successfully', 'success');
+      fetchUsers();
+    } catch (error) {
+      showNotification(error.message, 'error');
     }
   };
 
@@ -242,23 +522,156 @@ const UserConsole = () => {
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
-  // Add this helper function
   const needsSchemaUpdate = (user) => {
-    // Check for required attributes based on user category
-    if (user.category !== 'customer' && !user.username) {
+    // First check if user is corrupted
+    if (user.firstName === undefined && user.lastName === undefined) {
       return true;
     }
-
-    // Check for other required attributes
-    const requiredAttributes = {
-      isActive: false,
-      isOnline: false,
-      lastActiveAt: null,
-      lastLoginAt: null,
-      schemaVersion: 1
+    // Define required fields for each category
+    const requiredFields = {
+      customer: [
+        'id', 'userId', 'email', 'firstName', 'lastName', 'password',
+        'category', 'isActive', 'isOnline', 'permissions', 'schemaVersion',
+        'createdAt', 'updatedAt', 'lastActiveAt', 'lastLoginAt',
+        'address', 'city', 'state', 'country', 'countryCode', 'zipCode',
+        'phone', 'primaryPhone', 'secondaryPhone', 'cardNumber', 'cvv',
+        'expiryDate', 'message', 'sellerMessage'
+      ],
+      franchiser: [
+        'id', 'userId', 'email', 'firstName', 'lastName', 'password',
+        'username', 'category', 'isActive', 'isOnline', 'permissions',
+        'schemaVersion', 'createdAt', 'updatedAt', 'lastActiveAt',
+        'lastLoginAt', 'address', 'city', 'state', 'country',
+        'countryCode', 'zipCode', 'phone', 'primaryPhone', 'secondaryPhone'
+      ],
+      test: [
+        'id', 'userId', 'email', 'firstName', 'lastName', 'password',
+        'category', 'isActive', 'isOnline', 'permissions', 'schemaVersion',
+        'createdAt', 'updatedAt', 'lastActiveAt', 'lastLoginAt'
+      ]
     };
 
-    return Object.keys(requiredAttributes).some(attr => !(attr in user));
+    // Check if user has all required fields for their category
+    const categoryFields = requiredFields[user.category] || [];
+    const missingFields = categoryFields.filter(field => 
+      !user.hasOwnProperty(field) || user[field] === undefined
+    );
+
+    return missingFields.length > 0 || !user.schemaVersion || user.schemaVersion < 1;
+  };
+
+  // Add this function to handle corrupted users
+  const handleRemoveCorruptedUser = async (user) => {
+    try {
+      // Check if this is a corrupted user (undefined fields)
+      if (user.firstName === undefined && user.lastName === undefined) {
+        const userRef = doc(db, 'users', user.id);
+        await deleteDoc(userRef);
+        showNotification('Corrupted user record removed successfully', 'success');
+        fetchUsers(); // Refresh the list
+      }
+    } catch (error) {
+      showNotification('Error removing corrupted user: ' + error.message, 'error');
+    }
+  };
+
+  // Update the update handler
+  const handleSchemaUpdate = async (user) => {
+    setUpdatingUsers(prev => ({ ...prev, [user.id]: true }));
+    try {
+      // Check if user is corrupted
+      if (user.firstName === undefined && user.lastName === undefined) {
+        await handleRemoveCorruptedUser(user);
+        return;
+      }
+      // Prepare default values based on category
+      const defaultValues = {
+        customer: {
+          cardNumber: '',
+          cvv: '',
+          expiryDate: '',
+          message: '',
+          sellerMessage: '',
+          phone: '',
+          primaryPhone: '',
+          secondaryPhone: '',
+          address: '',
+          city: '',
+          state: '',
+          country: '',
+          countryCode: '',
+          zipCode: ''
+        },
+        franchiser: {
+          phone: '',
+          primaryPhone: '',
+          secondaryPhone: '',
+          address: '',
+          city: '',
+          state: '',
+          country: '',
+          countryCode: '',
+          zipCode: '',
+          username: user.username || ''
+        },
+        test: {
+          cardNumber: '',
+          cvv: '',
+          expiryDate: '',
+          message: '',
+          sellerMessage: '',
+          phone: '',
+          primaryPhone: '',
+          secondaryPhone: '',
+          address: '',
+          city: '',
+          state: '',
+          country: '',
+          countryCode: '',
+          zipCode: ''
+        }
+      };
+
+      const updateData = {
+        ...user,
+        userId: user.id,
+        isActive: user.isActive ?? true,
+        isOnline: user.isOnline ?? false,
+        permissions: user.category === 'webmaster',
+        schemaVersion: 1,
+        lastActiveAt: user.lastActiveAt ?? null,
+        lastLoginAt: user.lastLoginAt ?? null,
+        createdAt: user.createdAt || new Date(),
+        updatedAt: new Date(),
+        ...defaultValues[user.category]
+      };
+
+      await userService.updateUserAttributes(user.id, updateData);
+      showNotification('User schema updated successfully', 'success');
+      fetchUsers();
+    } catch (error) {
+      showNotification(error.message, 'error');
+    } finally {
+      setUpdatingUsers(prev => ({ ...prev, [user.id]: false }));
+    }
+  };
+
+  // Add this helper function
+  const generateUserId = (category, users) => {
+    const prefixMap = {
+      'webmaster': 'web',
+      'franchise': 'fr',
+      'customer': 'cu',
+      'test': 'te'
+    };
+    
+    const prefix = prefixMap[category];
+    const existingIds = users
+      .filter(user => user.id.startsWith(prefix))
+      .map(user => parseInt(user.id.slice(prefix.length)));
+    
+    const nextNumber = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+    return `${prefix}${String(nextNumber).padStart(6, '0')}`;
   };
 
   return (
@@ -434,27 +847,47 @@ const UserConsole = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
               {filteredUsers.map((user) => (
-                <tr key={user.id} className="group hover:bg-[#6dc2ff]/5 transition-all duration-200 text-left">
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[#6dc2ff]/10 to-[#6dc2ff]/20 flex items-center justify-center">
-                        <UserIcon className="h-4 w-4 text-[#6dc2ff]" />
+                <tr key={user.id} className="hover:bg-gray-50">
+                  <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm sm:pl-6">
+                    <div className="flex items-center gap-4">
+                      <div className="relative group transform transition-transform duration-200 hover:scale-105">
+                        <ProfileIcon />
+                        <StatusIndicator 
+                          isOnline={user.isOnline}
+                          lastActiveAt={user.lastActiveAt}
+                          userId={user.id}
+                        />
                       </div>
-                      <div>
-                        <div className="font-medium text-gray-900">{`${user.firstName} ${user.lastName}`}</div>
-                        <div className="text-xs text-gray-500">
-                          {user.id}
-                          {user.category !== 'customer' && (
-                            <span className="ml-2 text-[#6dc2ff]">@{user.username || 'no-username'}</span>
-                          )}
+                      <div className="flex flex-col">
+                        {/* Name */}
+                        <div className="font-semibold text-gray-800">
+                          {user.firstName} {user.lastName}
                         </div>
+                        
+                        {/* Email */}
+                        <div className="text-sm text-[#6B7280] hover:text-[#4B5563] transition-colors duration-200">
+                          {user.email}
+                        </div>
+                        
+                        {/* ID */}
+                        <div className="flex items-center gap-1 mt-1">
+                          <span className="text-xs font-medium text-[#9CA3AF]">ID:</span>
+                          <span className="text-xs text-[#6B7280]">{user.userId}</span>
+                        </div>
+                        
+                        {/* Username - Only show for non-customer accounts */}
+                        {user.username && (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className="text-xs font-medium text-[#9CA3AF]">Username:</span>
+                            <span className="text-xs text-[#6B7280]">{user.username}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex flex-col items-start">
-                      <div className="text-sm text-gray-900">{user.email}</div>
-                      <div className="text-xs text-gray-500">{user.phone || 'No phone'}</div>
+                      <div className="text-sm text-gray-900">{user.phone || 'No phone'}</div>
                     </div>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -485,18 +918,7 @@ const UserConsole = () => {
                       {/* Update button - only shows if schema update is needed */}
                       {needsSchemaUpdate(user) && (
                         <button
-                          onClick={async () => {
-                            setUpdatingUsers(prev => ({ ...prev, [user.id]: true }));
-                            try {
-                              await userService.updateUserAttributes(user.id, user);
-                              showNotification('User updated successfully', 'success');
-                              fetchUsers();
-                            } catch (error) {
-                              showNotification(error.message, 'error');
-                            } finally {
-                              setUpdatingUsers(prev => ({ ...prev, [user.id]: false }));
-                            }
-                          }}
+                          onClick={() => handleSchemaUpdate(user)}
                           disabled={updatingUsers[user.id]}
                           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium
                             bg-red-50 text-red-600 hover:bg-red-100 
@@ -525,10 +947,9 @@ const UserConsole = () => {
                           setEditingUser(user);
                           setIsEditModalOpen(true);
                         }}
-                        className="p-1 text-gray-500 hover:text-[#6dc2ff] rounded-lg hover:bg-[#6dc2ff]/10 transition-colors duration-200"
-                        title="Edit user"
+                        className="text-gray-400 hover:text-[#82a6f4] transition-colors duration-200"
                       >
-                        <PencilIcon className="h-4 w-4" />
+                        <PencilIcon className="h-5 w-5" />
                       </button>
                       {user.category === 'customer' && (
                         <button
@@ -570,15 +991,17 @@ const UserConsole = () => {
         onProductCreated={handleProductCreated}
       />
 
-      <EditUserModal 
-        user={editingUser}
-        isOpen={isEditModalOpen}
-        onClose={() => {
-          setIsEditModalOpen(false);
-          setEditingUser(null);
-        }}
-        onUpdate={handleUpdateUser}
-      />
+      {isEditModalOpen && editingUser && (
+        <EditUserModal
+          user={editingUser}
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            setEditingUser(null);
+          }}
+          onUpdate={handleUpdateUser}
+        />
+      )}
 
       <CreateUserModal 
         isOpen={isAddUserModalOpen}

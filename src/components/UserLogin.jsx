@@ -1,38 +1,58 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { EnvelopeIcon, LockClosedIcon } from '@heroicons/react/24/outline';
-import { toast } from 'react-hot-toast';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { useAuth } from '../contexts/AuthContext';
+import { EnvelopeIcon, LockClosedIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
+import { useNotification } from '../components/NotificationContext';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  updateDoc, 
+  serverTimestamp 
+} from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
+import { db } from '../firebaseConfig';
 
 const UserLogin = () => {
   const location = useLocation();
-  const [email, setEmail] = useState(location.state?.email || '');
-  const [password, setPassword] = useState('');
+  const [formData, setFormData] = useState({
+    email: location.state?.email || '',
+    password: ''
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { login } = useAuth();
+  const { showNotification } = useNotification();
 
   useEffect(() => {
-    // Show message if redirected from admin login
     if (location.state?.message) {
-      toast.info(location.state.message);
-      // Clean up the location state
+      showNotification(location.state.message, 'info');
       window.history.replaceState({}, document.title);
     }
-  }, [location]);
+  }, [location, showNotification]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError('');
     
     try {
-      // Check user in database
-      const usersRef = collection(db, USERS_COLLECTION);
-      const userQuery = query(usersRef, where("email", "==", email));
-      const userSnapshot = await getDocs(userQuery);
-
+      sessionStorage.clear();
+      
+      // First verify user exists and get their data
+      const usersRef = collection(db, 'users');
+      const emailQuery = query(
+        usersRef,
+        where("email", "==", formData.email)
+      );
+      
+      const userSnapshot = await getDocs(emailQuery);
+      
       if (userSnapshot.empty) {
-        toast.error('User not found');
-        return;
+        throw new Error('User not found in database');
       }
 
       const userData = {
@@ -40,41 +60,66 @@ const UserLogin = () => {
         ...userSnapshot.docs[0].data()
       };
 
-      // If user is a webmaster, redirect to admin login
+      // Check if user is webmaster
       if (userData.category === 'webmaster') {
         navigate('/admin/login', { 
-          state: { 
-            message: 'Please use the admin login page',
-            email: email 
-          } 
+          state: { message: 'Please use the admin login page' }
         });
         return;
       }
 
-      // Attempt login for non-webmaster users
-      const { login } = useAuth();
-      const loggedInUser = await login(email, password);
+      // Verify user category
+      if (!['customer', 'franchise', 'test'].includes(userData.category)) {
+        throw new Error('Invalid user category');
+      }
 
-      if (!loggedInUser) {
+      // Verify password
+      if (userData.password !== formData.password) {
         throw new Error('Invalid credentials');
       }
 
-      // Store user session
-      localStorage.setItem('sessionEmail', userData.email);
-      localStorage.setItem('userId', userData.id);
-      localStorage.setItem('userRole', userData.category);
+      // Authenticate with AuthContext
+      await login(formData.email, formData.password);
 
-      // Redirect based on user category
-      if (userData.category === 'customer') {
-        navigate('/customer-dashboard');
-      } else if (userData.category === 'franchise') {
-        navigate('/franchise-dashboard');
+      // Set session data
+      sessionStorage.setItem('userRole', userData.category);
+      sessionStorage.setItem('sessionEmail', userData.email);
+      sessionStorage.setItem('userId', userData.id);
+      sessionStorage.setItem('category', userData.category);
+      sessionStorage.setItem('isFranchise', userData.category === 'franchise' ? 'true' : 'false');
+      sessionStorage.setItem('isCustomer', userData.category === 'customer' ? 'true' : 'false');
+      sessionStorage.setItem('isTest', userData.category === 'test' ? 'true' : 'false');
+
+      // Update online status
+      const userRef = doc(db, 'users', userData.id);
+      await updateDoc(userRef, {
+        isOnline: true,
+        lastActiveAt: serverTimestamp()
+      });
+
+      // Navigate based on category
+      switch (userData.category) {
+        case 'customer':
+          navigate('/customer/dashboard');
+          break;
+        case 'franchise':
+          navigate('/franchise/dashboard');
+          break;
+        case 'test':
+          navigate('/customer/dashboard');
+          break;
+        default:
+          navigate('/');
       }
 
-      toast.success('Login successful!');
+      showNotification('Login successful!', 'success');
     } catch (error) {
       console.error('Login error:', error);
-      toast.error(error.message);
+      setError(error.message);
+      showNotification(error.message, 'error');
+      sessionStorage.clear();
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -87,34 +132,71 @@ const UserLogin = () => {
             Welcome Back
           </h1>
           
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm">
+              {error}
+            </div>
+          )}
+          
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="relative">
               <EnvelopeIcon className="h-5 w-5 text-[#82a6f4] absolute left-3 top-3" />
               <input
                 type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={formData.email}
+                onChange={(e) => setFormData({...formData, email: e.target.value})}
                 placeholder="Email"
-                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#82a6f4]/50 focus:border-transparent"
+                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-gray-800 
+                  placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#82a6f4]/50 
+                  focus:border-transparent"
+                required
               />
             </div>
 
             <div className="relative">
               <LockClosedIcon className="h-5 w-5 text-[#82a6f4] absolute left-3 top-3" />
               <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                type={showPassword ? "text" : "password"}
+                value={formData.password}
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
                 placeholder="Password"
-                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#82a6f4]/50 focus:border-transparent"
+                className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl text-gray-800 
+                  placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#82a6f4]/50 
+                  focus:border-transparent"
+                required
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 
+                  hover:text-gray-600 transition-colors"
+              >
+                {showPassword ? (
+                  <EyeSlashIcon className="h-5 w-5" />
+                ) : (
+                  <EyeIcon className="h-5 w-5" />
+                )}
+              </button>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 px-4 bg-[#82a6f4] hover:bg-[#6b8fd8] text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
+              disabled={isLoading}
+              className="w-full py-3 px-4 bg-[#82a6f4] hover:bg-[#6b8fd8] text-white font-medium 
+                rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 
+                disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              Sign In
+              {isLoading ? (
+                <>
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                  </svg>
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                'Sign In'
+              )}
             </button>
           </form>
         </div>

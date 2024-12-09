@@ -18,6 +18,7 @@ import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute';
 import { AdminLogin } from './components/AdminLogin';
 import { NotificationProvider } from './components/NotificationContext';
+import UserLogin from './components/UserLogin';
 
 const DefaultLayout = ({ children }) => (
   <div className="min-h-screen bg-gray-50 flex flex-col w-full">
@@ -51,22 +52,46 @@ function App() {
         <CartProvider>
           <Router>
             <Routes>
-              {/* Admin Routes */}
+              {/* Auth Routes */}
+              <Route path="/admin/login" element={<AdminLogin />} />
+              <Route path="/login" element={<UserLogin />} />
+
+              {/* Protected Admin Routes */}
               <Route
-                path="/admin/login"
+                path="/admin/*"
                 element={
-                  <div className="min-h-screen">
-                    <AdminLogin />
-                  </div>
+                  <DefaultLayout>
+                    <ProtectedRoute requiredRole="webmaster">
+                      <Routes>
+                        <Route path="/users" element={<UserConsole />} />
+                      </Routes>
+                    </ProtectedRoute>
+                  </DefaultLayout>
+                }
+              />
+
+              {/* Protected User Routes */}
+              <Route
+                path="/customer/*"
+                element={
+                  <DefaultLayout>
+                    <ProtectedRoute requiredRole={["customer", "test"]}>
+                      <Routes>
+                        <Route path="/dashboard" element={<CustomerDashboard />} />
+                      </Routes>
+                    </ProtectedRoute>
+                  </DefaultLayout>
                 }
               />
 
               <Route
-                path="/admin/users"
+                path="/franchise/*"
                 element={
                   <DefaultLayout>
-                    <ProtectedRoute requiredRole="webmaster">
-                      <UserConsole />
+                    <ProtectedRoute requiredRole="franchise">
+                      <Routes>
+                        <Route path="/dashboard" element={<FranchiseDashboard />} />
+                      </Routes>
                     </ProtectedRoute>
                   </DefaultLayout>
                 }
@@ -92,28 +117,6 @@ function App() {
               />
 
               {/* Protected Routes */}
-              <Route
-                path="/customer-dashboard"
-                element={
-                  <DefaultLayout>
-                    <ProtectedRoute requiredRole="customer">
-                      <CustomerDashboard />
-                    </ProtectedRoute>
-                  </DefaultLayout>
-                }
-              />
-
-              <Route
-                path="/franchise-dashboard"
-                element={
-                  <DefaultLayout>
-                    <ProtectedRoute requiredRole="franchise">
-                      <FranchiseDashboard />
-                    </ProtectedRoute>
-                  </DefaultLayout>
-                }
-              />
-
               <Route
                 path="/checkout"
                 element={

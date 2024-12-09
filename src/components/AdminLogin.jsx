@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LockClosedIcon, EyeIcon, EyeSlashIcon, UserIcon } from '@heroicons/react/24/outline';
 import { userService } from '../services/userService';
-import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import app from '../firebaseConfig';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../components/NotificationContext';
@@ -57,6 +57,13 @@ export const AdminLogin = () => {
       sessionStorage.setItem('category', 'webmaster');
       
       await login(formData.identifier, formData.password);
+
+      const userRef = doc(db, 'users', userData.id);
+      await updateDoc(userRef, {
+        isOnline: true,
+        lastActiveAt: serverTimestamp()
+      });
+
       navigate('/admin/users');
     } catch (error) {
       setError(error.message);

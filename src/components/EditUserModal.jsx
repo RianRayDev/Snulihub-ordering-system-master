@@ -16,14 +16,22 @@ import { useNotification } from '../components/NotificationContext';
 
 const EditUserModal = ({ user, isOpen, onClose, onUpdate }) => {
   const [showPassword, setShowPassword] = useState(false);
-  const [editForm, setEditForm] = React.useState({
-    email: user?.email || '',
-    firstName: user?.firstName || '',
-    lastName: user?.lastName || '',
-    phone: user?.phone || '',
-    category: user?.category || 'customer',
-    username: user?.username || '',
-    password: ''
+  const [editForm, setEditForm] = useState({
+    email: '',
+    firstName: '',
+    lastName: '',
+    phone: '',
+    primaryPhone: '',
+    secondaryPhone: '',
+    category: '',
+    username: '',
+    password: '',
+    address: '',
+    city: '',
+    state: '',
+    country: '',
+    countryCode: '',
+    zipCode: ''
   });
   const [isUpdating, setIsUpdating] = useState(false);
   const { showNotification } = useNotification();
@@ -35,9 +43,17 @@ const EditUserModal = ({ user, isOpen, onClose, onUpdate }) => {
         firstName: user.firstName || '',
         lastName: user.lastName || '',
         phone: user.phone || '',
+        primaryPhone: user.primaryPhone || '',
+        secondaryPhone: user.secondaryPhone || '',
         category: user.category || 'customer',
         username: user.username || '',
-        password: ''
+        password: '',
+        address: user.address || '',
+        city: user.city || '',
+        state: user.state || '',
+        country: user.country || '',
+        countryCode: user.countryCode || '',
+        zipCode: user.zipCode || ''
       });
     }
   }, [user]);
@@ -47,21 +63,25 @@ const EditUserModal = ({ user, isOpen, onClose, onUpdate }) => {
     setIsUpdating(true);
     try {
       const updates = {};
-      if (editForm.email !== user.email) updates.email = editForm.email;
-      if (editForm.firstName !== user.firstName) updates.firstName = editForm.firstName;
-      if (editForm.lastName !== user.lastName) updates.lastName = editForm.lastName;
-      if (editForm.phone !== user.phone) updates.phone = editForm.phone;
-      if (editForm.category !== user.category) updates.category = editForm.category;
-      if (editForm.username !== user.username) updates.username = editForm.username;
-      if (editForm.password) updates.password = editForm.password;
+      
+      // Only include changed fields
+      Object.keys(editForm).forEach(key => {
+        if (editForm[key] !== user[key] && editForm[key] !== '') {
+          updates[key] = editForm[key];
+        }
+      });
 
-      if (updates.username && editForm.category !== 'customer') {
-        await userService.validateUsername(updates.username, user.id);
+      // Don't include empty password
+      if (!editForm.password) {
+        delete updates.password;
+      }
+
+      // Include category if it's changed
+      if (editForm.category !== user.category) {
+        updates.category = editForm.category;
       }
 
       await onUpdate(updates);
-      showNotification('Profile updated successfully!', 'success');
-      onClose();
     } catch (error) {
       showNotification(error.message, 'error');
     } finally {
@@ -203,8 +223,9 @@ const EditUserModal = ({ user, isOpen, onClose, onUpdate }) => {
                       focus:outline-none focus:ring-1 focus:ring-[#82a6f4] focus:border-[#82a6f4] hover:border-[#82a6f4]/50 transition-all duration-200"
                   >
                     <option value="customer">Customer</option>
-                    <option value="franchise">Franchise</option>
+                    <option value="franchiser">Franchiser</option>
                     <option value="webmaster">Webmaster</option>
+                    <option value="test">Test</option>
                   </select>
                   <ChevronDownIcon className="h-5 w-5 text-gray-400 absolute right-3 top-[13px] pointer-events-none transition-colors duration-200 group-hover:text-[#82a6f4]" />
                 </div>

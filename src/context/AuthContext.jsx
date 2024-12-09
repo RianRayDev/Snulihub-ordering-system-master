@@ -34,8 +34,7 @@ export function AuthProvider({ children }) {
       const usersRef = collection(db, 'users');
       const q = query(
         usersRef,
-        where("email", "==", email),
-        where("category", "==", "webmaster")
+        where("email", "==", email)
       );
       
       const userSnapshot = await getDocs(q);
@@ -53,14 +52,9 @@ export function AuthProvider({ children }) {
         throw new Error('Invalid credentials');
       }
 
-      sessionStorage.setItem('userRole', 'webmaster');
-      sessionStorage.setItem('sessionEmail', userData.email);
-      sessionStorage.setItem('userId', userData.id);
-      sessionStorage.setItem('category', 'webmaster');
-
       setCurrentUser({
         ...userData,
-        category: 'webmaster'
+        category: userData.category
       });
 
       return userData;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   XMarkIcon,
   EnvelopeIcon,
@@ -18,19 +18,59 @@ const CreateUserModal = ({ isOpen, onClose, onCreateUser, userType }) => {
     firstName: '',
     lastName: '',
     phone: '',
-    password: '',
+    primaryPhone: '',
+    secondaryPhone: '',
     category: userType,
-    username: ''
+    password: '',
+    username: '',
+    address: '',
+    city: '',
+    state: '',
+    country: '',
+    countryCode: '',
+    zipCode: '',
+    cardNumber: '',
+    cvv: '',
+    expiryDate: '',
+    message: '',
+    sellerMessage: '',
+    isActive: true,
+    isOnline: false,
+    permissions: false,
+    schemaVersion: 1
   });
+
+  useEffect(() => {
+    setFormData(prev => ({
+      ...prev,
+      category: userType
+    }));
+  }, [userType]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
     try {
-      await onCreateUser(formData);
+      // Validate required fields
+      if (!formData.email || !formData.firstName || !formData.lastName) {
+        throw new Error('Please fill in all required fields');
+      }
+
+      // Validate username for non-customer users
+      if (formData.category !== 'customer' && !formData.username) {
+        throw new Error('Username is required for non-customer users');
+      }
+
+      // Ensure category is set from userType before submission
+      const submitData = {
+        ...formData,
+        category: userType
+      };
+
+      await onCreateUser(submitData);
       onClose();
-    } finally {
-      setIsLoading(false);
+    } catch (error) {
+      console.error('Error creating user:', error);
+      // Add error handling UI here
     }
   };
 
